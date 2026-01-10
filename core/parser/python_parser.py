@@ -161,6 +161,8 @@ def parse_functions(node: ast.AST) -> List[Dict[str, Any]]:
                     if isinstance(sub, (ast.Yield, ast.YieldFrom)):
                         yields = True
 
+                indent = n.col_offset        
+
                 funcs.append(
                     {
                         "name": n.name,
@@ -175,6 +177,7 @@ def parse_functions(node: ast.AST) -> List[Dict[str, Any]]:
                         "nesting_depth": nesting,
                         "raises": list(set(raises)),
                         "yields": yields,
+                        "indent": indent,
                     }
                 )
             except Exception as e:

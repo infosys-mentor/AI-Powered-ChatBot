@@ -6,3 +6,11 @@ groq
 python-dotenv
 langchain-community
 # llama-cpp-python --prefer-binary
+pydocstyle
+radon
+pytest-json-report
+
+
+# pip install -r requirements.txt
+
+# pytest --json-report --json-report-file=storage/reports/pytest_results.json

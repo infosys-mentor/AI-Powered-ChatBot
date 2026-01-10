@@ -1,85 +1,151 @@
+
 """
 core.docstring_engine.generator
-Generate Google-style baseline docstrings given parser metadata.
 
-Generator is non-destructive: returns docstring text but does not modify code files.
+Generates style-consistent docstrings using:
+- LLM for semantic content
+- Deterministic formatters for structure
 """
 
 from typing import Dict, List, Optional
+from core.docstring_engine.llm_integration import generate_docstring_content
 
 
+# -------------------------------------------------
+# Helpers
+# -------------------------------------------------
 def _arg_type_str(arg: Dict) -> str:
-    ann = arg.get("annotation")
-    if ann:
-        return ann
-    return "TYPE"
+    return arg.get("annotation") or "TYPE"
 
 
-def _format_args_section(args: List[Dict]) -> str:
+def _format_args_section(args: List[Dict], arg_desc: Dict[str, str]) -> str:
     if not args:
         return ""
     lines = ["Args:"]
     for a in args:
-        name = a.get("name")
+        name = a["name"]
         typ = _arg_type_str(a)
-        lines.append(f"    {name} ({typ}): DESCRIPTION.")
+        desc = arg_desc.get(name, "DESCRIPTION")
+        lines.append(f"    {name} ({typ}): {desc}")
     return "\n".join(lines)
 
 
-def _format_returns_section(returns: Optional[str], has_return_statements: bool) -> str:
-    if returns:
-        typ = returns
-    elif has_return_statements:
-        typ = "TYPE"
-    else:
+def _format_returns_section(returns: Optional[str], return_desc: str) -> str:
+    if not returns:
         return ""
-    return f"Returns:\n    {typ}: DESCRIPTION."
+    return f"Returns:\n    {returns}: {return_desc or 'DESCRIPTION'}"
 
 
-def _format_raises_section(raises: List[str]) -> str:
-    if not raises:
-        return ""
-    lines = ["Raises:"]
-    for r in raises:
-        lines.append(f"    {r}: DESCRIPTION.")
-    return "\n".join(lines)
+# -------------------------------------------------
+# Google style
+# -------------------------------------------------
+def generate_google_docstring(fn: Dict, llm: Dict) -> str:
+    summary = llm.get("summary", f"Short description of `{fn['name']}`.")
+    arg_desc = llm.get("args", {})
+    return_desc = llm.get("returns", "")
+    raises_desc = llm.get("raises", {})
 
+    parts = [summary, ""]
 
-def generate_google_docstring(func_meta: Dict) -> str:
-    """
-    Given metadata for a function (from parser), produce a Google-style docstring string.
-    """
-    name = func_meta.get("name", "<func>")
-    short_summary = f"Short description of `{name}`."
-    args = func_meta.get("args", [])
-    returns = func_meta.get("returns")
-    raises = func_meta.get("raises", [])
-    yields = func_meta.get("yields", False)
-
-    # Quick heuristic: if returns annotation or presence of return-related nodes exist
-    has_return = bool(returns) or func_meta.get("complexity", 0) >= 0 and True  # keep safe
-    # Better: check original docstring presence of return is not available here, so use returns + yields flag
-    if yields:
-        returns_text = "Yields:\n    TYPE: DESCRIPTION."
-    else:
-        returns_text = _format_returns_section(returns, has_return)
-
-    parts = [short_summary, ""]
-    args_section = _format_args_section(args)
+    args_section = _format_args_section(fn.get("args", []), arg_desc)
     if args_section:
         parts.append(args_section)
         parts.append("")
 
-    if returns_text:
-        parts.append(returns_text)
+    returns_section = _format_returns_section(fn.get("returns"), return_desc)
+    if returns_section:
+        parts.append(returns_section)
         parts.append("")
 
-    raises_section = _format_raises_section(raises)
-    if raises_section:
-        parts.append(raises_section)
+    if raises_desc:
+        parts.append("Raises:")
+        for exc, desc in raises_desc.items():
+            parts.append(f"    {exc}: {desc}")
         parts.append("")
 
-    # join and ensure trailing newline
-    doc = "\n".join(parts).strip() + "\n"
-    # Wrap with triple quotes
-    return '"""' + doc + '"""'
+    doc = "\n".join(parts).strip()
+    return f'"""\n{doc}\n"""'
+
+
+# -------------------------------------------------
+# NumPy style
+# -------------------------------------------------
+def generate_numpy_docstring(fn: Dict, llm: Dict) -> str:
+    summary = llm.get("summary", f"{fn['name']} function.")
+    arg_desc = llm.get("args", {})
+    return_desc = llm.get("returns", "")
+    raises_desc = llm.get("raises", {})
+
+    lines = [summary, "", "Parameters", "----------"]
+
+    for arg in fn.get("args", []):
+        t = arg.get("annotation") or "TYPE"
+        desc = arg_desc.get(arg["name"], "DESCRIPTION")
+        lines.append(f"{arg['name']} : {t}")
+        lines.append(f"    {desc}")
+
+    if fn.get("returns"):
+        lines.extend([
+            "",
+            "Returns",
+            "-------",
+            f"{fn['returns']}",
+            f"    {return_desc or 'DESCRIPTION'}"
+        ])
+
+    if raises_desc:
+        lines.extend(["", "Raises", "------"])
+        for exc, desc in raises_desc.items():
+            lines.append(f"{exc}")
+            lines.append(f"    {desc}")
+
+    return f'"""\n' + "\n".join(lines) + '\n"""'
+
+
+# -------------------------------------------------
+# reST style
+# -------------------------------------------------
+def generate_rest_docstring(fn: Dict, llm: Dict) -> str:
+    summary = llm.get("summary", f"{fn['name']} function.")
+    arg_desc = llm.get("args", {})
+    return_desc = llm.get("returns", "")
+    raises_desc = llm.get("raises", {})
+
+    lines = [summary, ""]
+
+    for arg in fn.get("args", []):
+        t = arg.get("annotation") or "TYPE"
+        desc = arg_desc.get(arg["name"], "DESCRIPTION")
+        lines.append(f":param {arg['name']}: {desc}")
+        lines.append(f":type {arg['name']}: {t}")
+
+    if fn.get("returns"):
+        lines.append(f":return: {return_desc or 'DESCRIPTION'}")
+        lines.append(f":rtype: {fn['returns']}")
+
+    for exc, desc in raises_desc.items():
+        lines.append(f":raises {exc}: {desc}")
+
+    return f'"""\n' + "\n".join(lines) + '\n"""'
+
+
+# -------------------------------------------------
+# Main entry
+# -------------------------------------------------
+def generate_docstring(fn: Dict, style: str = "google") -> str:
+    """
+    Generate docstring using:
+    - LLM for meaning
+    - Code for formatting
+    """
+
+    llm_content = generate_docstring_content(fn)
+
+    if style == "google":
+        return generate_google_docstring(fn, llm_content)
+    elif style == "numpy":
+        return generate_numpy_docstring(fn, llm_content)
+    elif style == "rest":
+        return generate_rest_docstring(fn, llm_content)
+    else:
+        raise ValueError(f"Unknown style: {style}")
