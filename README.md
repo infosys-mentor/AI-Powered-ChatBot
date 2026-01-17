@@ -1,6 +1,3 @@
----
-
-```md
 # 🤖 AI-Powered-ChatBot
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
@@ -152,3 +149,4 @@ If you find this project useful, please ⭐ star the repository
 For issues or questions, open a GitHub issue.
 
 ---
+
